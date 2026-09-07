@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply scroll-smooth;
+  }
+
+  body {
+    @apply bg-wine-50 text-wine-950 font-body antialiased;
+  }
+
+  h1, h2, h3, h4 {
+    @apply font-display;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-primary {
+    @apply btn bg-wine-700 text-white shadow-wine hover:bg-wine-800 active:bg-wine-900;
+  }
+
+  .btn-outline {
+    @apply btn border border-wine-300 text-wine-700 hover:bg-wine-100;
+  }
+
+  .btn-ghost {
+    @apply btn text-wine-700 hover:bg-wine-100;
+  }
+
+  .btn-gold {
+    @apply btn bg-gold-500 text-wine-950 hover:bg-gold-400;
+  }
+
+  .input {
+    @apply w-full rounded-xl border border-wine-200 bg-white px-4 py-2.5 text-sm text-wine-950 placeholder-wine-400 outline-none transition focus:border-wine-500 focus:ring-2 focus:ring-wine-200;
+  }
+
+  .card {
+    @apply rounded-2xl border border-wine-100 bg-white shadow-sm;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold;
+  }
+}

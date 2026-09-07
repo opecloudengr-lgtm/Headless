@@ -1,0 +1,12 @@
+**/node_modules
+**/dist
+**/venv
+**/venv2
+**/venv3
+**/__pycache__
+**/*.pyc
+**/.git
+**/instance
+**/uploads
+**/*.db
+**/.env
