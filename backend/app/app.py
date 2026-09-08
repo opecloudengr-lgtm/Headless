@@ -1,8 +1,10 @@
 import os
+import time
 
 from flask import Flask, jsonify, send_from_directory
 from flask_login import LoginManager
 from flask_cors import CORS
+from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -439,7 +441,50 @@ with app.app_context():
     # This does NOT delete existing data.
     # Use `flask --app app seed` when you
     # intentionally want a fresh seeded database.
-    db.create_all()
+    #
+    # create_all() checks for each table's existence and then issues
+    # its CREATE TABLE — two gunicorn workers booting at the same time
+    # against a brand-new database can both pass the "does it exist"
+    # check for the same table before either has created it, and the
+    # loser's CREATE TABLE then fails outright. Retrying after a short
+    # pause lets the winner finish first, so create_all()'s own
+    # existence check then correctly skips what's already there.
+    for attempt in range(5):
+        try:
+            db.create_all()
+            break
+        except Exception as exc:
+            db.session.rollback()
+            if attempt == 4:
+                raise
+            print(f"create_all() hit a concurrent-worker race, retrying: {exc}")
+            time.sleep(0.2 * (attempt + 1))
+
+    # db.create_all() only creates missing tables — it never alters a
+    # table that already exists from a previous deploy. This project
+    # has no migration framework wired up, so a column added to an
+    # existing model (like MediaItem.is_hidden) has to be patched onto
+    # a live database by hand here, or every query touching it 500s
+    # with "no such column" the moment this code reaches a database
+    # that predates the column.
+    inspector = inspect(db.engine)
+
+    if "media_items" in inspector.get_table_names():
+        existing_columns = {
+            col["name"] for col in inspector.get_columns("media_items")
+        }
+
+        if "is_hidden" not in existing_columns:
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE media_items "
+                    "ADD COLUMN is_hidden BOOLEAN NOT NULL DEFAULT false"
+                ))
+                db.session.commit()
+                print("Migrated media_items: added is_hidden column.")
+            except Exception as exc:
+                db.session.rollback()
+                print(f"Could not add is_hidden to media_items: {exc}")
 
     # Create default categories if the database has no categories yet.
     #
