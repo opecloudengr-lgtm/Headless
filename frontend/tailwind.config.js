@@ -33,6 +33,23 @@ export default {
       },
       backgroundImage: {
         "wine-gradient": "linear-gradient(135deg, #4a1622 0%, #722f37 55%, #8c2f40 100%)",
+        "wine-mesh":
+          "radial-gradient(60% 50% at 15% 20%, rgba(224,187,98,0.20) 0%, rgba(224,187,98,0) 60%), radial-gradient(55% 45% at 85% 15%, rgba(140,47,64,0.55) 0%, rgba(140,47,64,0) 60%), linear-gradient(160deg, #2c0d16 0%, #4a1622 45%, #722f37 100%)",
+      },
+      keyframes: {
+        blob: {
+          "0%, 100%": { transform: "translate(0, 0) scale(1)" },
+          "33%": { transform: "translate(4%, -6%) scale(1.08)" },
+          "66%": { transform: "translate(-3%, 4%) scale(0.95)" },
+        },
+        "fade-up": {
+          "0%": { opacity: "0", transform: "translateY(12px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
+      },
+      animation: {
+        blob: "blob 14s ease-in-out infinite",
+        "fade-up": "fade-up 0.6s ease-out both",
       },
     },
   },
