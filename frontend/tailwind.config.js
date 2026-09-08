@@ -27,6 +27,7 @@ export default {
       fontFamily: {
         display: ["'Playfair Display'", "serif"],
         body: ["'Inter'", "system-ui", "sans-serif"],
+        logo: ["'Baloo 2'", "'Inter'", "sans-serif"],
       },
       boxShadow: {
         wine: "0 12px 30px -10px rgba(56, 15, 25, 0.45)",

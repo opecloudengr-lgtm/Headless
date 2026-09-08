@@ -31,11 +31,13 @@ FRONTEND_DIST = os.environ.get(
     os.path.join(BASE_DIR, "static_frontend"),
 )
 
-app = Flask(
-    __name__,
-    static_folder=FRONTEND_DIST,
-    static_url_path="",
-)
+# static_folder is disabled here on purpose: with static_url_path="" Flask
+# auto-registers its own static handler on the exact same "/<path:...>"
+# rule used below for SPA fallback routing, and — since that implicit
+# route is registered first, during Flask() construction — it wins the
+# match and 404s outright on any client-side route (e.g. a hard refresh
+# on /login or /media/1) instead of ever reaching serve_frontend().
+app = Flask(__name__, static_folder=None)
 
 app.config["SECRET_KEY"] = os.environ.get(
     "SECRET_KEY",
@@ -206,13 +208,13 @@ def health():
 @app.route("/<path:path>")
 def serve_frontend(path):
 
-    if path and os.path.exists(os.path.join(app.static_folder or "", path)):
-        return send_from_directory(app.static_folder, path)
+    if path and os.path.isfile(os.path.join(FRONTEND_DIST, path)):
+        return send_from_directory(FRONTEND_DIST, path)
 
-    index_path = os.path.join(app.static_folder or "", "index.html")
+    index_path = os.path.join(FRONTEND_DIST, "index.html")
 
     if os.path.isfile(index_path):
-        return send_from_directory(app.static_folder, "index.html")
+        return send_from_directory(FRONTEND_DIST, "index.html")
 
     return jsonify(
         {
