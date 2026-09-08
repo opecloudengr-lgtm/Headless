@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import Alert from "../components/Alert.jsx";
+import TagPicker from "../components/TagPicker.jsx";
 
 const ACCEPT = {
   Movie: ".mp4,.mkv,.avi",
@@ -16,6 +17,7 @@ export default function Upload() {
   const [categories, setCategories] = useState([]);
   const [form, setForm] = useState({ title: "", description: "", category_id: "", is_featured: false });
   const [file, setFile] = useState(null);
+  const [tags, setTags] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -45,6 +47,7 @@ export default function Upload() {
     data.append("description", form.description);
     data.append("category_id", form.category_id);
     data.append("is_featured", String(form.is_featured));
+    data.append("tagged_usernames", tags.join(","));
     data.append("media_file", file);
 
     setLoading(true);
@@ -115,6 +118,16 @@ export default function Upload() {
               Allowed: {ACCEPT[selectedCategory.name]?.replaceAll(".", "").replaceAll(",", ", ")}
             </p>
           )}
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm font-semibold text-wine-800">
+            Tag people (optional)
+          </label>
+          <TagPicker value={tags} onChange={setTags} placeholder="Tag whoever requested this…" />
+          <p className="mt-1 text-xs text-wine-500">
+            Fulfilling a request from the Timeline? Tag them here so it shows up on their profile.
+          </p>
         </div>
 
         {user?.is_admin && (

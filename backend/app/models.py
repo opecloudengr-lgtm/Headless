@@ -68,6 +68,75 @@ likes = db.Table(
 
 
 # -------------------------------------------------------------------
+# Association table: users tagged on a media upload
+# -------------------------------------------------------------------
+
+media_tags = db.Table(
+    "media_tags",
+
+    db.Column(
+        "media_item_id",
+        db.Integer,
+        db.ForeignKey("media_items.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+
+    db.Column(
+        "tagged_user_id",
+        db.Integer,
+        db.ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+)
+
+
+# -------------------------------------------------------------------
+# Association table: users tagged in a timeline post
+# -------------------------------------------------------------------
+
+post_tags = db.Table(
+    "post_tags",
+
+    db.Column(
+        "post_id",
+        db.Integer,
+        db.ForeignKey("posts.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+
+    db.Column(
+        "tagged_user_id",
+        db.Integer,
+        db.ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+)
+
+
+# -------------------------------------------------------------------
+# Association table: users liking a timeline post
+# -------------------------------------------------------------------
+
+post_likes = db.Table(
+    "post_likes",
+
+    db.Column(
+        "user_id",
+        db.Integer,
+        db.ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+
+    db.Column(
+        "post_id",
+        db.Integer,
+        db.ForeignKey("posts.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+)
+
+
+# -------------------------------------------------------------------
 # USER MODEL
 # -------------------------------------------------------------------
 
@@ -309,6 +378,12 @@ class MediaItem(db.Model):
         nullable=False,
     )
 
+    is_hidden = db.Column(
+        db.Boolean,
+        default=False,
+        nullable=False,
+    )
+
     uploader_id = db.Column(
         db.Integer,
         db.ForeignKey(
@@ -325,6 +400,13 @@ class MediaItem(db.Model):
             ondelete="CASCADE",
         ),
         nullable=False,
+    )
+
+    tagged_users = db.relationship(
+        "User",
+        secondary=media_tags,
+        backref=db.backref("tagged_in_media", lazy="select"),
+        lazy="select",
     )
 
     def to_dict(self):
@@ -346,6 +428,8 @@ class MediaItem(db.Model):
 
             "is_featured": self.is_featured,
 
+            "is_hidden": self.is_hidden,
+
             "category": (
                 self.category.name
                 if self.category
@@ -358,6 +442,13 @@ class MediaItem(db.Model):
                 else 0
             ),
 
+            "comments_count": len(self.comments),
+
+            "tagged_users": [
+                {"id": u.id, "username": u.username}
+                for u in self.tagged_users
+            ],
+
             "uploader": {
                 "id": self.uploader_id,
 
@@ -366,5 +457,240 @@ class MediaItem(db.Model):
                     if self.uploader
                     else None
                 ),
+            },
+        }
+
+
+# -------------------------------------------------------------------
+# POST MODEL (general timeline: short text posts, separate from
+# media uploads — a request board / status-update feed)
+# -------------------------------------------------------------------
+
+class Post(db.Model):
+
+    __tablename__ = "posts"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    body = db.Column(db.String(500), nullable=False)
+
+    created_at = db.Column(
+        db.DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    is_hidden = db.Column(db.Boolean, default=False, nullable=False)
+
+    author_id = db.Column(
+        db.Integer,
+        db.ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    author = db.relationship(
+        "User",
+        backref=db.backref(
+            "posts", lazy=True, cascade="all, delete-orphan"
+        ),
+    )
+
+    tagged_users = db.relationship(
+        "User",
+        secondary=post_tags,
+        backref=db.backref("tagged_in_posts", lazy="select"),
+        lazy="select",
+    )
+
+    liked_by = db.relationship(
+        "User",
+        secondary=post_likes,
+        backref=db.backref("liked_posts", lazy="select"),
+        lazy="select",
+    )
+
+    def to_dict(self):
+
+        return {
+            "id": self.id,
+            "body": self.body,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "is_hidden": self.is_hidden,
+            "likes_count": len(self.liked_by),
+            "comments_count": len(self.comments),
+            "tagged_users": [
+                {"id": u.id, "username": u.username}
+                for u in self.tagged_users
+            ],
+            "author": {
+                "id": self.author_id,
+                "username": self.author.username if self.author else None,
+            },
+        }
+
+
+# -------------------------------------------------------------------
+# COMMENT MODEL (shared by media uploads and timeline posts —
+# exactly one of media_item_id / post_id is set on any given row)
+# -------------------------------------------------------------------
+
+class Comment(db.Model):
+
+    __tablename__ = "comments"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    body = db.Column(db.String(1000), nullable=False)
+
+    created_at = db.Column(
+        db.DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    author_id = db.Column(
+        db.Integer,
+        db.ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    media_item_id = db.Column(
+        db.Integer,
+        db.ForeignKey("media_items.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+
+    post_id = db.Column(
+        db.Integer,
+        db.ForeignKey("posts.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+
+    author = db.relationship(
+        "User",
+        backref=db.backref(
+            "comments", lazy=True, cascade="all, delete-orphan"
+        ),
+    )
+
+    media_item = db.relationship(
+        "MediaItem",
+        backref=db.backref(
+            "comments", lazy=True, cascade="all, delete-orphan"
+        ),
+    )
+
+    post = db.relationship(
+        "Post",
+        backref=db.backref(
+            "comments", lazy=True, cascade="all, delete-orphan"
+        ),
+    )
+
+    def to_dict(self):
+
+        return {
+            "id": self.id,
+            "body": self.body,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "media_item_id": self.media_item_id,
+            "post_id": self.post_id,
+            "author": {
+                "id": self.author_id,
+                "username": self.author.username if self.author else None,
+            },
+        }
+
+
+# -------------------------------------------------------------------
+# SAVED ITEM MODEL (bookmarks — works across both content types via
+# an item_type discriminator rather than a typed foreign key)
+# -------------------------------------------------------------------
+
+class SavedItem(db.Model):
+
+    __tablename__ = "saved_items"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    item_type = db.Column(db.String(20), nullable=False)  # "media" | "post"
+
+    item_id = db.Column(db.Integer, nullable=False)
+
+    created_at = db.Column(
+        db.DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    user = db.relationship(
+        "User",
+        backref=db.backref(
+            "saved_items", lazy=True, cascade="all, delete-orphan"
+        ),
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "user_id", "item_type", "item_id", name="uq_saved_item"
+        ),
+    )
+
+
+# -------------------------------------------------------------------
+# REPORT MODEL (content moderation queue — media, posts, or comments)
+# -------------------------------------------------------------------
+
+class Report(db.Model):
+
+    __tablename__ = "reports"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    item_type = db.Column(db.String(20), nullable=False)  # "media" | "post" | "comment"
+
+    item_id = db.Column(db.Integer, nullable=False)
+
+    reason = db.Column(db.String(500), nullable=False)
+
+    status = db.Column(db.String(20), default="pending", nullable=False)  # pending | dismissed | actioned
+
+    created_at = db.Column(
+        db.DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    reporter_id = db.Column(
+        db.Integer,
+        db.ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    reporter = db.relationship(
+        "User",
+        backref=db.backref(
+            "reports_filed", lazy=True, cascade="all, delete-orphan"
+        ),
+    )
+
+    def to_dict(self):
+
+        return {
+            "id": self.id,
+            "item_type": self.item_type,
+            "item_id": self.item_id,
+            "reason": self.reason,
+            "status": self.status,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "reporter": {
+                "id": self.reporter_id,
+                "username": self.reporter.username if self.reporter else None,
             },
         }

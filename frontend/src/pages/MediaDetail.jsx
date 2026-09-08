@@ -5,6 +5,8 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { CategoryTile } from "../components/CategoryIcon.jsx";
 import Spinner from "../components/Spinner.jsx";
 import Alert from "../components/Alert.jsx";
+import ReportButton from "../components/ReportButton.jsx";
+import CommentSection from "../components/CommentSection.jsx";
 
 export default function MediaDetail() {
   const { id } = useParams();
@@ -17,6 +19,7 @@ export default function MediaDetail() {
   const [error, setError] = useState("");
   const [liking, setLiking] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState({ title: "", description: "" });
   const [notice, setNotice] = useState("");
@@ -67,6 +70,19 @@ export default function MediaDetail() {
       // ignore transient failure
     } finally {
       setLiking(false);
+    }
+  }
+
+  async function handleSaveToggle() {
+    if (!user || saving) return;
+    setSaving(true);
+    try {
+      const res = await api.toggleSave("media", item.id);
+      setItem((prev) => ({ ...prev, saved_by_me: res.saved }));
+    } catch {
+      // ignore transient failure
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -142,15 +158,36 @@ export default function MediaDetail() {
                 </Link>{" "}
                 &middot; {new Date(item.uploaded_at).toLocaleDateString()}
               </p>
+              {item.tagged_users?.length > 0 && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs font-semibold text-wine-500">Tagged:</span>
+                  {item.tagged_users.map((u) => (
+                    <Link key={u.id} to={`/profile/${u.id}`} className="badge bg-wine-50 text-wine-600 hover:bg-wine-100">
+                      @{u.username}
+                    </Link>
+                  ))}
+                </div>
+              )}
             </div>
 
-            <button
-              onClick={handleLike}
-              disabled={!user || liking}
-              className={`btn ${item.liked_by_me ? "bg-wine-700 text-white" : "btn-outline"} shrink-0`}
-            >
-              {item.liked_by_me ? "♥ Liked" : "♡ Like"} &middot; {item.likes_count}
-            </button>
+            <div className="flex shrink-0 items-start gap-2">
+              <button
+                onClick={handleLike}
+                disabled={!user || liking}
+                className={`btn ${item.liked_by_me ? "bg-wine-700 text-white" : "btn-outline"}`}
+              >
+                {item.liked_by_me ? "♥ Liked" : "♡ Like"} &middot; {item.likes_count}
+              </button>
+              <button
+                onClick={handleSaveToggle}
+                disabled={!user || saving}
+                title={item.saved_by_me ? "Remove from saved" : "Save"}
+                className={`btn ${item.saved_by_me ? "bg-gold-500 text-wine-950" : "btn-outline"}`}
+              >
+                {item.saved_by_me ? "★ Saved" : "☆ Save"}
+              </button>
+              <ReportButton itemType="media" itemId={item.id} className="pt-2" />
+            </div>
           </div>
 
           {editing ? (
@@ -221,6 +258,13 @@ export default function MediaDetail() {
               )}
             </div>
           )}
+
+          <div className="border-t border-wine-100 pt-6">
+            <h2 className="mb-4 font-display text-lg font-bold text-wine-950">
+              Comments &middot; {item.comments_count ?? 0}
+            </h2>
+            <CommentSection targetType="media" targetId={item.id} contentOwnerId={item.uploader?.id} />
+          </div>
         </div>
       </div>
     </div>

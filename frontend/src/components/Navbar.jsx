@@ -36,9 +36,7 @@ export default function Navbar() {
 
         <nav className="hidden items-center gap-1 md:flex">
           <NavItem to="/explore">Explore</NavItem>
-          <NavItem to="/explore?category=Movie">Movies</NavItem>
-          <NavItem to="/explore?category=Music">Music</NavItem>
-          <NavItem to="/explore?category=Ebook">Ebooks</NavItem>
+          <NavItem to="/timeline">Timeline</NavItem>
           {user && <NavItem to="/dashboard">Dashboard</NavItem>}
           {user?.is_admin && <NavItem to="/admin">Admin</NavItem>}
         </nav>
@@ -85,9 +83,7 @@ export default function Navbar() {
         <div className="border-t border-wine-100 bg-white px-4 pb-4 md:hidden">
           <div className="flex flex-col gap-1 pt-2">
             <NavItem to="/explore">Explore</NavItem>
-            <NavItem to="/explore?category=Movie">Movies</NavItem>
-            <NavItem to="/explore?category=Music">Music</NavItem>
-            <NavItem to="/explore?category=Ebook">Ebooks</NavItem>
+            <NavItem to="/timeline">Timeline</NavItem>
             {user && <NavItem to="/dashboard">Dashboard</NavItem>}
             {user?.is_admin && <NavItem to="/admin">Admin</NavItem>}
           </div>

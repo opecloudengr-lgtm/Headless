@@ -4,6 +4,18 @@ A full-stack media sharing app: upload, browse, follow creators, and like
 Movies, Music, and Ebooks. Password + OTP authentication, an admin panel
 for managing users and featured content, and a wine & white UI.
 
+On top of media sharing, Headless has a lightweight social layer:
+- **Timeline** — a separate feed of short text posts (`/timeline`), for
+  asking for something, sharing an update, or tagging other users.
+- **Comments** — on both media uploads and timeline posts.
+- **Save/bookmark** — media and posts, listed under Profile → Saved.
+- **Report** — media, posts, or comments; admins review and dismiss or
+  remove the content from Admin → Reports.
+- **Tagging** — `@username` in a post/comment auto-links to that user;
+  the upload form has an explicit tag picker so a creator can tag whoever
+  requested what they just uploaded. Tagged content shows up under
+  Profile → Tagged In for the person who was tagged.
+
 - **Backend**: Flask, Flask-Login (session auth), SQLAlchemy, SQLite (or Postgres).
 - **Frontend**: React (Vite), React Router, Tailwind CSS.
 - **Deployment**: single Docker image — Flask serves both the API (`/api/*`) and the built React app.
@@ -99,6 +111,11 @@ implementation.
 | Catalog | `GET /categories`, `GET /explore?category=&q=`, `GET /media/<id>`, `GET /media/<id>/stream` |
 | Media | `POST /media/upload`, `PUT /media/<id>/edit`, `DELETE /media/<id>/delete` |
 | Social | `POST /creator/<id>/follow`, `POST /media/<id>/like` |
+| Timeline | `GET /timeline`, `POST /posts`, `GET /posts/<id>`, `DELETE /posts/<id>`, `POST /posts/<id>/like` |
+| Comments | `GET /media/<id>/comments`, `GET /posts/<id>/comments`, `POST /comments`, `DELETE /comments/<id>` |
+| Save | `POST /save/<media\|post>/<id>`, `GET /saved` |
+| Report | `POST /report/<media\|post\|comment>/<id>`, `GET /admin/reports`, `PUT /admin/reports/<id>/resolve` |
+| Tagging | `GET /users/search?q=`, `GET /user/tagged` (tagging itself happens via `tagged_usernames` on `POST /media/upload` and `POST /posts`, or `@mentions` in post/comment bodies) |
 | Profile | `GET /dashboard`, `GET /user/my-uploads`, `PUT /user/profile/edit`, `GET /user/<id>/profile` |
 | Admin | `GET /admin/users`, `PUT /admin/user/<id>/status`, `PUT /admin/media/<id>/feature` |
 

@@ -82,12 +82,40 @@ export const api = {
   toggleFollow: (creatorId) => request(`/creator/${creatorId}/follow`, { method: "POST" }),
   toggleLike: (itemId) => request(`/media/${itemId}/like`, { method: "POST" }),
 
+  // Users (tag picker)
+  searchUsers: (q) => request(`/users/search?q=${encodeURIComponent(q)}`),
+
+  // Timeline / posts
+  timeline: () => request("/timeline"),
+  createPost: (payload) => request("/posts", { method: "POST", body: payload }),
+  post: (id) => request(`/posts/${id}`),
+  deletePost: (id) => request(`/posts/${id}`, { method: "DELETE" }),
+  togglePostLike: (id) => request(`/posts/${id}/like`, { method: "POST" }),
+
+  // Comments (media_item_id XOR post_id)
+  mediaComments: (mediaId) => request(`/media/${mediaId}/comments`),
+  postComments: (postId) => request(`/posts/${postId}/comments`),
+  createComment: (payload) => request("/comments", { method: "POST", body: payload }),
+  deleteComment: (id) => request(`/comments/${id}`, { method: "DELETE" }),
+
+  // Save / bookmark
+  toggleSave: (itemType, itemId) => request(`/save/${itemType}/${itemId}`, { method: "POST" }),
+  saved: () => request("/saved"),
+  taggedIn: () => request("/user/tagged"),
+
+  // Report
+  reportItem: (itemType, itemId, reason) =>
+    request(`/report/${itemType}/${itemId}`, { method: "POST", body: { reason } }),
+
   // Admin
   adminUsers: () => request("/admin/users"),
   adminSetUserStatus: (userId, status) =>
     request(`/admin/user/${userId}/status`, { method: "PUT", body: { status } }),
   adminSetFeatured: (itemId, isFeatured) =>
     request(`/admin/media/${itemId}/feature`, { method: "PUT", body: { is_featured: isFeatured } }),
+  adminReports: (status = "pending") => request(`/admin/reports?status=${status}`),
+  adminResolveReport: (id, action) =>
+    request(`/admin/reports/${id}/resolve`, { method: "PUT", body: { action } }),
 };
 
 export { ApiError };

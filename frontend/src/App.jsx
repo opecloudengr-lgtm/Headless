@@ -9,6 +9,8 @@ import Login from "./pages/Login.jsx";
 import Register from "./pages/Register.jsx";
 import VerifyOtp from "./pages/VerifyOtp.jsx";
 import Explore from "./pages/Explore.jsx";
+import Timeline from "./pages/Timeline.jsx";
+import PostDetail from "./pages/PostDetail.jsx";
 import MediaDetail from "./pages/MediaDetail.jsx";
 import Upload from "./pages/Upload.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
@@ -28,6 +30,8 @@ export default function App() {
           <Route path="/register" element={<Register />} />
           <Route path="/verify-otp" element={<VerifyOtp />} />
           <Route path="/explore" element={<Explore />} />
+          <Route path="/timeline" element={<Timeline />} />
+          <Route path="/posts/:id" element={<PostDetail />} />
           <Route path="/media/:id" element={<MediaDetail />} />
           <Route path="/profile/:userId" element={<PublicProfile />} />
 

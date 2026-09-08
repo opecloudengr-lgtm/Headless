@@ -7,7 +7,16 @@ from flask_login import current_user, login_required, login_user, logout_user
 from sqlalchemy import func, or_
 from werkzeug.utils import secure_filename
 
-from models import Category, MediaItem, User, db
+from models import (
+    Category,
+    Comment,
+    MediaItem,
+    Post,
+    Report,
+    SavedItem,
+    User,
+    db,
+)
 
 
 api_bp = Blueprint("api", __name__)
@@ -32,9 +41,22 @@ def allowed_file(filename, category_name):
     )
 
 
+def is_saved_by_current_user(item_type, item_id):
+    if not current_user.is_authenticated:
+        return False
+
+    return db.session.execute(
+        db.select(SavedItem.id).where(
+            SavedItem.user_id == current_user.id,
+            SavedItem.item_type == item_type,
+            SavedItem.item_id == item_id,
+        )
+    ).scalar_one_or_none() is not None
+
+
 def serialize_item(item):
     """
-    MediaItem.to_dict() plus the current viewer's like state, which
+    MediaItem.to_dict() plus viewer-specific state (like/save), which
     depends on the request's logged-in user and so can't live on the
     model itself.
     """
@@ -45,7 +67,46 @@ def serialize_item(item):
         and any(u.id == current_user.id for u in item.liked_by)
     )
 
+    data["saved_by_me"] = is_saved_by_current_user("media", item.id)
+
     return data
+
+
+def serialize_post(post):
+    data = post.to_dict()
+
+    data["liked_by_me"] = bool(
+        current_user.is_authenticated
+        and any(u.id == current_user.id for u in post.liked_by)
+    )
+
+    data["saved_by_me"] = is_saved_by_current_user("post", post.id)
+
+    return data
+
+
+def serialize_comment(comment):
+    return comment.to_dict()
+
+
+TAG_MENTION_PATTERN = re.compile(r"@([A-Za-z0-9_.]{3,50})")
+
+
+def resolve_tagged_users(usernames):
+    """
+    Look up existing users by username, silently dropping anything
+    that doesn't resolve to a real account. Used for both explicit
+    tag lists (upload form, post composer) and @mentions parsed out
+    of free text.
+    """
+    cleaned = {u.strip().lstrip("@") for u in usernames if u and u.strip()}
+
+    if not cleaned:
+        return []
+
+    return db.session.execute(
+        db.select(User).where(User.username.in_(cleaned))
+    ).scalars().all()
 
 
 # -------------------------------------------------------------------
@@ -79,7 +140,7 @@ def explore():
     category_filter = request.args.get("category")
     search_query = request.args.get("q")
 
-    stmt = db.select(MediaItem)
+    stmt = db.select(MediaItem).where(MediaItem.is_hidden.is_(False))
 
     if category_filter:
         stmt = (
@@ -103,7 +164,7 @@ def explore():
 
     featured_items = db.session.execute(
         db.select(MediaItem)
-        .where(MediaItem.is_featured.is_(True))
+        .where(MediaItem.is_featured.is_(True), MediaItem.is_hidden.is_(False))
         .order_by(MediaItem.uploaded_at.desc())
         .limit(5)
     ).scalars().all()
@@ -129,6 +190,15 @@ def stream_media(item_id):
     item = db.session.get(MediaItem, item_id)
 
     if item is None:
+        return jsonify({
+            "error": "Media item not found."
+        }), 404
+
+    is_owner_or_admin = current_user.is_authenticated and (
+        current_user.id == item.uploader_id or current_user.is_admin
+    )
+
+    if item.is_hidden and not is_owner_or_admin:
         return jsonify({
             "error": "Media item not found."
         }), 404
@@ -832,7 +902,8 @@ def user_dashboard():
             .where(
                 MediaItem.uploader_id.in_(
                     followed_ids
-                )
+                ),
+                MediaItem.is_hidden.is_(False),
             )
             .order_by(
                 MediaItem.uploaded_at.desc()
@@ -852,7 +923,8 @@ def user_dashboard():
         latest = db.session.execute(
             db.select(MediaItem)
             .where(
-                MediaItem.category_id == category.id
+                MediaItem.category_id == category.id,
+                MediaItem.is_hidden.is_(False),
             )
             .order_by(
                 MediaItem.uploaded_at.desc()
@@ -977,12 +1049,21 @@ def get_user_public_profile(user_id):
         for item in user.uploads
     )
 
+    is_owner_or_admin = current_user.is_authenticated and (
+        current_user.id == user.id or current_user.is_admin
+    )
+
+    visible_uploads = [
+        item for item in user.uploads
+        if is_owner_or_admin or not item.is_hidden
+    ]
+
     return jsonify({
         "user_id": user.id,
         "username": user.username,
         "status": user.status,
         "total_uploads_count": len(
-            user.uploads
+            visible_uploads
         ),
         "total_likes_received": (
             total_received_likes
@@ -995,7 +1076,7 @@ def get_user_public_profile(user_id):
         ),
         "public_catalog": [
             serialize_item(item)
-            for item in user.uploads
+            for item in visible_uploads
         ],
     }), 200
 
@@ -1013,6 +1094,15 @@ def get_media_item(item_id):
     )
 
     if item is None:
+        return jsonify({
+            "error": "Media item not found."
+        }), 404
+
+    is_owner_or_admin = current_user.is_authenticated and (
+        current_user.id == item.uploader_id or current_user.is_admin
+    )
+
+    if item.is_hidden and not is_owner_or_admin:
         return jsonify({
             "error": "Media item not found."
         }), 404
@@ -1054,6 +1144,11 @@ def upload_media():
         ).lower()
         == "true"
     )
+
+    tagged_usernames_raw = request.form.get("tagged_usernames", "")
+    tagged_usernames = [
+        u for u in tagged_usernames_raw.split(",") if u.strip()
+    ]
 
     if not title or not category_id:
         return jsonify({
@@ -1157,6 +1252,9 @@ def upload_media():
             else False
         ),
     )
+
+    if tagged_usernames:
+        new_item.tagged_users = resolve_tagged_users(tagged_usernames)
 
     try:
         db.session.add(new_item)
@@ -1565,4 +1663,443 @@ def admin_toggle_featured_spotlight(item_id):
             "successfully."
         ),
         "media_item": serialize_item(item),
+    }), 200
+
+
+# -------------------------------------------------------------------
+# TAGGED-IN (closes the request-fulfillment loop: whoever asked for
+# something on the Timeline can see here when a creator tags them
+# on an upload or a post)
+# -------------------------------------------------------------------
+
+@api_bp.route("/user/tagged", methods=["GET"])
+@login_required
+def get_tagged_in():
+    tagged_media = [
+        item for item in current_user.tagged_in_media
+        if not item.is_hidden
+    ]
+
+    tagged_posts = [
+        post for post in current_user.tagged_in_posts
+        if not post.is_hidden
+    ]
+
+    tagged_media.sort(key=lambda item: item.uploaded_at, reverse=True)
+    tagged_posts.sort(key=lambda post: post.created_at, reverse=True)
+
+    return jsonify({
+        "tagged_media": [serialize_item(item) for item in tagged_media],
+        "tagged_posts": [serialize_post(post) for post in tagged_posts],
+    }), 200
+
+
+# -------------------------------------------------------------------
+# USER SEARCH (tag picker autocomplete)
+# -------------------------------------------------------------------
+
+@api_bp.route("/users/search", methods=["GET"])
+def search_users():
+    query = (request.args.get("q") or "").strip()
+
+    if len(query) < 1:
+        return jsonify({"users": []}), 200
+
+    users = db.session.execute(
+        db.select(User)
+        .where(User.username.ilike(f"%{query}%"))
+        .order_by(User.username.asc())
+        .limit(10)
+    ).scalars().all()
+
+    return jsonify({
+        "users": [
+            {"id": u.id, "username": u.username}
+            for u in users
+        ]
+    }), 200
+
+
+# -------------------------------------------------------------------
+# TIMELINE / POSTS
+#
+# A separate feed from media uploads: short text posts (think a
+# Twitter/Facebook wall) where anyone can ask for something, share an
+# update, or tag other users. A creator who later uploads media that
+# answers a request tags the requester directly on the upload (see
+# tagged_usernames on POST /media/upload) rather than replying here.
+# -------------------------------------------------------------------
+
+@api_bp.route("/timeline", methods=["GET"])
+def list_timeline():
+    posts = db.session.execute(
+        db.select(Post)
+        .where(Post.is_hidden.is_(False))
+        .order_by(Post.created_at.desc())
+        .limit(100)
+    ).scalars().all()
+
+    return jsonify({
+        "posts": [serialize_post(p) for p in posts]
+    }), 200
+
+
+@api_bp.route("/posts", methods=["POST"])
+@login_required
+def create_post():
+    data = request.get_json(silent=True) or {}
+
+    body = str(data.get("body", "")).strip()
+
+    if not body:
+        return jsonify({"error": "Post body is required."}), 400
+
+    if len(body) > 500:
+        return jsonify({"error": "Posts are limited to 500 characters."}), 400
+
+    explicit_tags = data.get("tagged_usernames") or []
+
+    if not isinstance(explicit_tags, list):
+        return jsonify({"error": "tagged_usernames must be a list."}), 400
+
+    mentioned = TAG_MENTION_PATTERN.findall(body)
+
+    new_post = Post(body=body, author_id=current_user.id)
+    new_post.tagged_users = resolve_tagged_users([*explicit_tags, *mentioned])
+
+    db.session.add(new_post)
+    db.session.commit()
+
+    return jsonify({
+        "success": "Post published.",
+        "post": serialize_post(new_post),
+    }), 201
+
+
+@api_bp.route("/posts/<int:post_id>", methods=["GET"])
+def get_post(post_id):
+    post = db.session.get(Post, post_id)
+
+    if post is None:
+        return jsonify({"error": "Post not found."}), 404
+
+    is_owner_or_admin = current_user.is_authenticated and (
+        current_user.id == post.author_id or current_user.is_admin
+    )
+
+    if post.is_hidden and not is_owner_or_admin:
+        return jsonify({"error": "Post not found."}), 404
+
+    return jsonify({"post": serialize_post(post)}), 200
+
+
+@api_bp.route("/posts/<int:post_id>", methods=["DELETE"])
+@login_required
+def delete_post(post_id):
+    post = db.session.get(Post, post_id)
+
+    if post is None:
+        return jsonify({"error": "Post not found."}), 404
+
+    if post.author_id != current_user.id and not current_user.is_admin:
+        return jsonify({"error": "Unauthorized deletion attempt."}), 403
+
+    db.session.delete(post)
+    db.session.commit()
+
+    return jsonify({"success": "Post deleted successfully."}), 200
+
+
+@api_bp.route("/posts/<int:post_id>/like", methods=["POST"])
+@login_required
+def toggle_like_post(post_id):
+    post = db.session.get(Post, post_id)
+
+    if post is None:
+        return jsonify({"error": "Post not found."}), 404
+
+    if post in current_user.liked_posts:
+        current_user.liked_posts.remove(post)
+        action = "removed"
+    else:
+        current_user.liked_posts.append(post)
+        action = "added"
+
+    db.session.commit()
+
+    return jsonify({
+        "success": f"Like {action} successfully.",
+        "likes_count": len(post.liked_by),
+    }), 200
+
+
+# -------------------------------------------------------------------
+# COMMENTS (shared by media uploads and timeline posts)
+# -------------------------------------------------------------------
+
+@api_bp.route("/media/<int:item_id>/comments", methods=["GET"])
+def list_media_comments(item_id):
+    item = db.session.get(MediaItem, item_id)
+
+    if item is None:
+        return jsonify({"error": "Media item not found."}), 404
+
+    comments = db.session.execute(
+        db.select(Comment)
+        .where(Comment.media_item_id == item_id)
+        .order_by(Comment.created_at.asc())
+    ).scalars().all()
+
+    return jsonify({
+        "comments": [serialize_comment(c) for c in comments]
+    }), 200
+
+
+@api_bp.route("/posts/<int:post_id>/comments", methods=["GET"])
+def list_post_comments(post_id):
+    post = db.session.get(Post, post_id)
+
+    if post is None:
+        return jsonify({"error": "Post not found."}), 404
+
+    comments = db.session.execute(
+        db.select(Comment)
+        .where(Comment.post_id == post_id)
+        .order_by(Comment.created_at.asc())
+    ).scalars().all()
+
+    return jsonify({
+        "comments": [serialize_comment(c) for c in comments]
+    }), 200
+
+
+@api_bp.route("/comments", methods=["POST"])
+@login_required
+def create_comment():
+    data = request.get_json(silent=True) or {}
+
+    body = str(data.get("body", "")).strip()
+    media_item_id = data.get("media_item_id")
+    post_id = data.get("post_id")
+
+    if not body:
+        return jsonify({"error": "Comment body is required."}), 400
+
+    if len(body) > 1000:
+        return jsonify({"error": "Comments are limited to 1000 characters."}), 400
+
+    if bool(media_item_id) == bool(post_id):
+        return jsonify({
+            "error": "Provide exactly one of media_item_id or post_id."
+        }), 400
+
+    if media_item_id:
+        target = db.session.get(MediaItem, media_item_id)
+        if target is None:
+            return jsonify({"error": "Media item not found."}), 404
+        comment = Comment(body=body, author_id=current_user.id, media_item_id=media_item_id)
+    else:
+        target = db.session.get(Post, post_id)
+        if target is None:
+            return jsonify({"error": "Post not found."}), 404
+        comment = Comment(body=body, author_id=current_user.id, post_id=post_id)
+
+    db.session.add(comment)
+    db.session.commit()
+
+    return jsonify({
+        "success": "Comment added.",
+        "comment": serialize_comment(comment),
+    }), 201
+
+
+@api_bp.route("/comments/<int:comment_id>", methods=["DELETE"])
+@login_required
+def delete_comment(comment_id):
+    comment = db.session.get(Comment, comment_id)
+
+    if comment is None:
+        return jsonify({"error": "Comment not found."}), 404
+
+    owns_parent_content = (
+        (comment.media_item and comment.media_item.uploader_id == current_user.id)
+        or (comment.post and comment.post.author_id == current_user.id)
+    )
+
+    if (
+        comment.author_id != current_user.id
+        and not owns_parent_content
+        and not current_user.is_admin
+    ):
+        return jsonify({"error": "Unauthorized deletion attempt."}), 403
+
+    db.session.delete(comment)
+    db.session.commit()
+
+    return jsonify({"success": "Comment deleted successfully."}), 200
+
+
+# -------------------------------------------------------------------
+# SAVE / BOOKMARK (works across media uploads and timeline posts)
+# -------------------------------------------------------------------
+
+SAVEABLE_TYPES = {"media": MediaItem, "post": Post}
+
+
+@api_bp.route("/save/<item_type>/<int:item_id>", methods=["POST"])
+@login_required
+def toggle_save(item_type, item_id):
+    model = SAVEABLE_TYPES.get(item_type)
+
+    if model is None:
+        return jsonify({"error": "Invalid item type."}), 400
+
+    target = db.session.get(model, item_id)
+
+    if target is None:
+        return jsonify({"error": "Item not found."}), 404
+
+    existing = db.session.execute(
+        db.select(SavedItem).where(
+            SavedItem.user_id == current_user.id,
+            SavedItem.item_type == item_type,
+            SavedItem.item_id == item_id,
+        )
+    ).scalar_one_or_none()
+
+    if existing:
+        db.session.delete(existing)
+        db.session.commit()
+        return jsonify({"success": "Removed from saved items.", "saved": False}), 200
+
+    db.session.add(SavedItem(user_id=current_user.id, item_type=item_type, item_id=item_id))
+    db.session.commit()
+
+    return jsonify({"success": "Saved.", "saved": True}), 200
+
+
+@api_bp.route("/saved", methods=["GET"])
+@login_required
+def list_saved_items():
+    saved_rows = db.session.execute(
+        db.select(SavedItem)
+        .where(SavedItem.user_id == current_user.id)
+        .order_by(SavedItem.created_at.desc())
+    ).scalars().all()
+
+    saved_media = []
+    saved_posts = []
+
+    for row in saved_rows:
+        model = SAVEABLE_TYPES.get(row.item_type)
+        target = db.session.get(model, row.item_id) if model else None
+
+        if target is None:
+            continue
+
+        if row.item_type == "media":
+            saved_media.append(serialize_item(target))
+        else:
+            saved_posts.append(serialize_post(target))
+
+    return jsonify({
+        "saved_media": saved_media,
+        "saved_posts": saved_posts,
+    }), 200
+
+
+# -------------------------------------------------------------------
+# REPORT (content moderation queue)
+# -------------------------------------------------------------------
+
+REPORTABLE_TYPES = {"media": MediaItem, "post": Post, "comment": Comment}
+
+
+@api_bp.route("/report/<item_type>/<int:item_id>", methods=["POST"])
+@login_required
+def report_item(item_type, item_id):
+    model = REPORTABLE_TYPES.get(item_type)
+
+    if model is None:
+        return jsonify({"error": "Invalid item type."}), 400
+
+    target = db.session.get(model, item_id)
+
+    if target is None:
+        return jsonify({"error": "Item not found."}), 404
+
+    data = request.get_json(silent=True) or {}
+    reason = str(data.get("reason", "")).strip()
+
+    if not reason:
+        return jsonify({"error": "A reason is required."}), 400
+
+    db.session.add(Report(
+        item_type=item_type,
+        item_id=item_id,
+        reason=reason[:500],
+        reporter_id=current_user.id,
+    ))
+    db.session.commit()
+
+    return jsonify({"success": "Report submitted. Our team will review it."}), 201
+
+
+@api_bp.route("/admin/reports", methods=["GET"])
+@login_required
+def admin_list_reports():
+    if not current_user.is_admin:
+        return jsonify({"error": "Administrative privileges required."}), 403
+
+    status_filter = request.args.get("status", "pending")
+
+    stmt = db.select(Report).order_by(Report.created_at.desc())
+
+    if status_filter != "all":
+        stmt = stmt.where(Report.status == status_filter)
+
+    reports = db.session.execute(stmt).scalars().all()
+
+    return jsonify({
+        "reports": [r.to_dict() for r in reports]
+    }), 200
+
+
+@api_bp.route("/admin/reports/<int:report_id>/resolve", methods=["PUT"])
+@login_required
+def admin_resolve_report(report_id):
+    if not current_user.is_admin:
+        return jsonify({"error": "Administrative privileges required."}), 403
+
+    report = db.session.get(Report, report_id)
+
+    if report is None:
+        return jsonify({"error": "Report not found."}), 404
+
+    data = request.get_json(silent=True) or {}
+    action = data.get("action")
+
+    if action not in {"dismiss", "hide"}:
+        return jsonify({"error": "action must be 'dismiss' or 'hide'."}), 400
+
+    if action == "hide":
+        model = REPORTABLE_TYPES.get(report.item_type)
+        target = db.session.get(model, report.item_id) if model else None
+
+        if target is not None and hasattr(target, "is_hidden"):
+            target.is_hidden = True
+        elif target is not None:
+            # Comments have no visibility flag of their own — hiding
+            # a reported comment means removing it outright.
+            db.session.delete(target)
+
+        report.status = "actioned"
+    else:
+        report.status = "dismissed"
+
+    db.session.commit()
+
+    return jsonify({
+        "success": f"Report {report.status}.",
+        "report": report.to_dict(),
     }), 200
