@@ -19,7 +19,7 @@ function NavItem({ to, children }) {
 }
 
 export default function Navbar() {
-  const { user, logout } = useAuth();
+  const { user, loading, logout } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
 
@@ -44,7 +44,9 @@ export default function Navbar() {
         </nav>
 
         <div className="hidden items-center gap-2 md:flex">
-          {user ? (
+          {loading ? (
+            <div className="h-9 w-40" />
+          ) : user ? (
             <>
               <Link to="/upload" className="btn-outline">
                 Upload
@@ -90,7 +92,7 @@ export default function Navbar() {
             {user?.is_admin && <NavItem to="/admin">Admin</NavItem>}
           </div>
           <div className="mt-3 flex flex-col gap-2">
-            {user ? (
+            {loading ? null : user ? (
               <>
                 <Link to="/upload" className="btn-outline w-full" onClick={() => setOpen(false)}>
                   Upload

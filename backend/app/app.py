@@ -4,6 +4,7 @@ from flask import Flask, jsonify, send_from_directory
 from flask_login import LoginManager
 from flask_cors import CORS
 from sqlalchemy.exc import IntegrityError
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from models import (
     Category,
@@ -38,6 +39,12 @@ FRONTEND_DIST = os.environ.get(
 # match and 404s outright on any client-side route (e.g. a hard refresh
 # on /login or /media/1) instead of ever reaching serve_frontend().
 app = Flask(__name__, static_folder=None)
+
+# Railway (like Heroku/nginx) terminates TLS at its edge and forwards
+# plain HTTP to the container, so without this Flask sees every
+# request as insecure/wrong-host regardless of what the browser
+# actually connected over.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
 app.config["SECRET_KEY"] = os.environ.get(
     "SECRET_KEY",
@@ -104,9 +111,34 @@ app.config["DEMO_MODE"] = os.environ.get(
     "DEMO_MODE", "true"
 ).lower() != "false"
 
+# ---------------------------------------------------------------
+# Session cookie
+#
+# Local dev runs Flask over plain HTTP, so a Secure-only cookie would
+# silently never be sent and every login would appear to fail. Guard
+# with FLASK_DEBUG (which is only ever set locally) rather than trying
+# to detect "is this Railway" from a specific env var — Railway's own
+# variables aren't guaranteed to be named consistently across
+# platform versions, and defaulting to *not* Secure in production is
+# the wrong failure mode (a cookie the browser then refuses to send
+# back is exactly the "logged in, but nothing after that recognizes
+# it" symptom this is fixing).
+#
+# If CORS_ORIGINS is set, the frontend is on a different origin than
+# this API (e.g. deployed as two separate Railway services), so the
+# cookie must be SameSite=None to be sent on those cross-origin
+# fetches at all — SameSite=Lax is silently dropped by the browser on
+# cross-site XHR/fetch, which looks identical to "login doesn't
+# stick" from the frontend's point of view.
+# ---------------------------------------------------------------
+
+is_local_dev = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
+cors_origins = os.environ.get("CORS_ORIGINS", "")
+is_cross_origin = bool(cors_origins.strip())
+
 app.config.update(
-    SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=os.environ.get("RAILWAY_ENVIRONMENT") is not None,
+    SESSION_COOKIE_SAMESITE="None" if is_cross_origin else "Lax",
+    SESSION_COOKIE_SECURE=not is_local_dev,
 )
 
 
@@ -119,12 +151,11 @@ db.init_app(app)
 
 # -------------------------------------------------------------------
 # CORS (only relevant when the frontend is hosted on a different
-# origin than the API, e.g. local Vite dev server on another port)
+# origin than the API, e.g. local Vite dev server on another port,
+# or the frontend and backend deployed as two separate services)
 # -------------------------------------------------------------------
 
-cors_origins = os.environ.get("CORS_ORIGINS", "")
-
-if cors_origins:
+if is_cross_origin:
     CORS(
         app,
         supports_credentials=True,

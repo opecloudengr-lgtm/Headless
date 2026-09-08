@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { api } from "../api/client.js";
+import { api, setUnauthorizedHandler } from "../api/client.js";
 
 const AuthContext = createContext(null);
 
@@ -21,6 +21,11 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    setUnauthorizedHandler(() => setUser(null));
+    return () => setUnauthorizedHandler(null);
+  }, []);
 
   const logout = useCallback(async () => {
     try {

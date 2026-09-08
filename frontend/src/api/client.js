@@ -8,6 +8,16 @@ class ApiError extends Error {
   }
 }
 
+// AuthContext registers itself here so that a 401 from ANY endpoint —
+// not just the initial session check — immediately clears the cached
+// user state. Without this, a session that drops server-side (cookie
+// rejected, account suspended mid-session, etc.) leaves the nav bar
+// showing a stale "logged in" state until the next full page load.
+let unauthorizedHandler = null;
+export function setUnauthorizedHandler(fn) {
+  unauthorizedHandler = fn;
+}
+
 async function request(path, { method = "GET", body, isForm = false } = {}) {
   const headers = {};
   if (!isForm) headers["Content-Type"] = "application/json";
@@ -30,6 +40,7 @@ async function request(path, { method = "GET", body, isForm = false } = {}) {
   }
 
   if (!res.ok) {
+    if (res.status === 401) unauthorizedHandler?.();
     throw new ApiError(data?.error || `Request failed (${res.status})`, res.status, data);
   }
 
